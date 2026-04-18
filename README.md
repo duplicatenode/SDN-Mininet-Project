@@ -1,4 +1,4 @@
-# Assignment 5 — Packet Logger using SDN Controller
+# Packet Logger using SDN Controller and Mininet
 ### Framework: POX · OpenFlow 1.0 · Python 2.7 / 3.x
 
 ---
