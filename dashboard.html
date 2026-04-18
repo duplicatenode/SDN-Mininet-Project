@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Assignment 5 — SDN Packet Logger (POX)</title>
+<style>
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;
+  --border:#30363d;--text:#e6edf3;--muted:#7d8590;
+  --green:#3fb950;--blue:#58a6ff;--yellow:#d29922;
+  --red:#f85149;--purple:#bc8cff;--teal:#39d353;--orange:#f0883e;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Courier New',monospace;font-size:13px;min-height:100vh;}
+
+/* ── Header ── */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.logo{font-size:14px;font-weight:700;letter-spacing:.05em;color:var(--text);}
+.logo span{color:var(--green);}
+.pill{display:flex;align-items:center;gap:6px;font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:3px 12px;}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:blink 1.4s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.hdr-right{margin-left:auto;font-size:11px;color:var(--muted);display:flex;gap:16px;}
+
+/* ── Metric cards ── */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;padding:16px 20px 0;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;}
+.card-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;}
+.card-val{font-size:24px;font-weight:700;line-height:1;}
+.g{color:var(--green);}.b{color:var(--blue);}.y{color:var(--yellow);}.r{color:var(--red);}.p{color:var(--purple);}
+
+/* ── Controls ── */
+.controls{display:flex;gap:8px;padding:14px 20px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border);}
+button{font-family:inherit;font-size:12px;padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;transition:background .15s;}
+button:hover{background:var(--border);}
+button.go{border-color:var(--green);color:var(--green);}
+button.go.on{background:var(--green);color:#000;font-weight:700;}
+button.stop{border-color:var(--red);color:var(--red);}
+button.stop:hover{background:rgba(248,81,73,.15);}
+select,input[type=text]{font-family:inherit;font-size:12px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);}
+input[type=text]{width:200px;}
+.sep{width:1px;height:24px;background:var(--border);}
+.ftr-count{margin-left:auto;font-size:11px;color:var(--muted);}
+
+/* ── Layout ── */
+.body-grid{display:grid;grid-template-columns:1fr 300px;height:calc(100vh - 235px);}
+
+/* ── Log table ── */
+.log-wrap{overflow-y:auto;overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:11.5px;}
+thead th{position:sticky;top:0;z-index:10;background:var(--surface2);padding:7px 9px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;}
+tbody tr{border-bottom:1px solid rgba(48,54,61,.45);cursor:pointer;}
+tbody tr:hover{background:rgba(255,255,255,.03);}
+tbody tr.sel{background:rgba(88,166,255,.07);border-left:2px solid var(--blue);}
+tbody tr.new{animation:fadeIn .35s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+td{padding:5px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;}
+td.dim{color:var(--muted);}
+
+/* ── Protocol badges ── */
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.04em;}
+.TCP  {background:#0d2137;color:#58a6ff;}
+.UDP  {background:#0d2d14;color:#3fb950;}
+.HTTP {background:#0d2a2a;color:#39d353;}
+.HTTPS{background:#0a2000;color:#8ee666;}
+.ICMP {background:#2d1f00;color:#d29922;}
+.ARP  {background:#2d0a0a;color:#f85149;}
+.DNS  {background:#1e0d37;color:#bc8cff;}
+.IPv4 {background:#1a1a2d;color:#79c0ff;}
+.IPv6 {background:#2d1a00;color:#f0883e;}
+.LLDP,.UNKNOWN{background:#1c1c1c;color:#7d8590;}
+
+/* ── Sidebar ── */
+.sidebar{border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;}
+.sb-hdr{padding:10px 14px;border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;flex-shrink:0;}
+.detail-sec{padding:10px 14px;border-bottom:1px solid var(--border);}
+.detail-sec-title{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:7px;}
+.drow{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px;font-size:11px;}
+.dkey{color:var(--muted);flex-shrink:0;}
+.dval{color:var(--text);text-align:right;word-break:break-all;}
+.dval.hi{color:var(--blue);}
+.no-sel{padding:20px 14px;font-size:11px;color:var(--muted);line-height:1.6;}
+
+/* ── Proto chart ── */
+.chart-wrap{padding:12px 14px;}
+.prow{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:11px;}
+.pname{width:52px;color:var(--text);}
+.pbar-bg{flex:1;background:var(--surface2);border-radius:3px;height:5px;overflow:hidden;}
+.pbar{height:100%;border-radius:3px;transition:width .5s ease;}
+.pcnt{width:28px;text-align:right;color:var(--muted);}
+
+footer{text-align:center;padding:5px;font-size:10px;color:var(--muted);border-top:1px solid var(--border);background:var(--surface);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">&#9646;&#9646; SDN <span>Packet Logger</span></div>
+  <div class="pill"><span class="dot" id="dot"></span><span id="st">LIVE CAPTURE</span></div>
+  <span style="font-size:11px;color:var(--muted)">POX Controller · OpenFlow 1.0 · port 6633</span>
+  <div class="hdr-right">
+    <span id="clock"></span>
+    <span id="uptime">up 0s</span>
+  </div>
+</header>
+
+<div class="metrics">
+  <div class="card"><div class="card-lbl">Total Packets</div><div class="card-val g" id="m-pkts">0</div></div>
+  <div class="card"><div class="card-lbl">Bytes Captured</div><div class="card-val b" id="m-bytes">0 B</div></div>
+  <div class="card"><div class="card-lbl">Packets / sec</div><div class="card-val y" id="m-pps">0</div></div>
+  <div class="card"><div class="card-lbl">Protocols</div><div class="card-val" id="m-protos">0</div></div>
+  <div class="card"><div class="card-lbl">Switches</div><div class="card-val r" id="m-sw">0</div></div>
+  <div class="card"><div class="card-lbl">Unique Flows</div><div class="card-val p" id="m-flows">0</div></div>
+</div>
+
+<div class="controls">
+  <button class="go on" id="btn-start" onclick="startCapture()">&#9654; Capture</button>
+  <button class="stop" onclick="stopCapture()">&#9646;&#9646; Stop</button>
+  <button onclick="clearLog()">&#x2715; Clear</button>
+  <div class="sep"></div>
+  <select id="pf" onchange="applyFilter()">
+    <option value="all">All protocols</option>
+    <option value="TCP">TCP</option>
+    <option value="UDP">UDP</option>
+    <option value="HTTP">HTTP</option>
+    <option value="HTTPS">HTTPS</option>
+    <option value="ICMP">ICMP</option>
+    <option value="ARP">ARP</option>
+    <option value="DNS">DNS</option>
+    <option value="IPv4">IPv4</option>
+    <option value="IPv6">IPv6</option>
+  </select>
+  <input type="text" id="sq" placeholder="Search IP, port, info..." oninput="applyFilter()"/>
+  <div class="sep"></div>
+  <button onclick="exportCSV()">&#8595; CSV</button>
+  <button onclick="exportJSON()">&#8595; JSON</button>
+  <span class="ftr-count" id="fc">0 packets</span>
+</div>
+
+<div class="body-grid">
+  <!-- Log table -->
+  <div class="log-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px">#</th>
+          <th style="width:96px">Time</th>
+          <th style="width:68px">Protocol</th>
+          <th>Src IP</th>
+          <th>Dst IP</th>
+          <th style="width:58px">Src Port</th>
+          <th style="width:58px">Dst Port</th>
+          <th style="width:52px">Bytes</th>
+          <th style="width:80px">Flags / Type</th>
+          <th style="width:52px">Switch</th>
+          <th style="width:42px">Port</th>
+          <th>Info</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div id="empty" style="text-align:center;padding:40px;color:var(--muted);font-size:12px">
+      &#9654; Press Capture to start logging packets...
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sb-hdr">Packet Header Detail</div>
+    <div id="detail">
+      <div class="no-sel">Click any row to inspect full packet headers captured by the POX controller.</div>
+    </div>
+    <div class="sb-hdr">Protocol Distribution</div>
+    <div class="chart-wrap" id="pchart"></div>
+  </div>
+</div>
+
+<footer>Assignment 5 – Packet Logger using SDN Controller (POX) &nbsp;·&nbsp; OpenFlow 1.0</footer>
+
+<script>
+/* ── Simulation data ─────────────────────────────────────── */
+const SUBNETS=['10.0.0.','192.168.1.','172.16.0.','10.10.5.'];
+const PROTOS=['TCP','TCP','TCP','UDP','HTTP','HTTPS','ICMP','ARP','DNS','IPv4','IPv6'];
+const PROTO_COLOR={
+  TCP:'#58a6ff',UDP:'#3fb950',HTTP:'#39d353',HTTPS:'#8ee666',
+  ICMP:'#d29922',ARP:'#f85149',DNS:'#bc8cff',
+  IPv4:'#79c0ff',IPv6:'#f0883e',LLDP:'#7d8590',UNKNOWN:'#7d8590'
+};
+const TCP_FLAGS_LIST=['SYN','ACK','FIN','RST','PSH','SYN|ACK','FIN|ACK','PSH|ACK'];
+const ICMP_TYPES=['Echo Request','Echo Reply','Dest Unreachable','TTL Exceeded'];
+const ARP_OPS=['Request','Reply'];
+const HTTP_INFOS=['GET /index.html HTTP/1.1','POST /api/data HTTP/1.1','HTTP/1.1 200 OK','HTTP/1.1 404 Not Found','HTTP/1.1 301 Redirect'];
+
+let packets=[],filtered=[],counter=0,totalBytes=0;
+let protoStats={},switchSet=new Set(),flowSet=new Set(),seenProtos=new Set();
+let running=false,intv=null,ppsIntv=null,recent=0,selId=null,startTime=Date.now(),uptimeIntv=null;
+
+const ri=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const re=a=>a[ri(0,a.length-1)];
+const rIP=()=>re(SUBNETS)+ri(1,254);
+const rPort=()=>Math.random()<.5?re([80,443,22,53,8080,3306,67,68,123,25,110,3389]):ri(1024,65535);
+const rMAC=()=>Array.from({length:6},()=>ri(0,255).toString(16).padStart(2,'0')).join(':');
+const now=()=>{const d=new Date();return d.toTimeString().slice(0,8)+'.'+String(d.getMilliseconds()).padStart(3,'0');};
+
+function gen(){
+  const proto=re(PROTOS);
+  const src=rIP(),dst=rIP(),sp=rPort(),dp=rPort();
+  const len=ri(64,1480),ttl=ri(32,128);
+  const sw='s'+ri(1,5),port=ri(1,8);
+  const srcMac=rMAC(),dstMac=rMAC();
+  let flags='—',info='';
+  switch(proto){
+    case 'TCP': flags=re(TCP_FLAGS_LIST); info=`${src}:${sp} → ${dst}:${dp} [${flags}]`; break;
+    case 'UDP': info=`${src}:${sp} → ${dst}:${dp}`; break;
+    case 'HTTP':flags=re(['GET','POST','200','404','301']); info=re(HTTP_INFOS); break;
+    case 'HTTPS':flags=re(['SYN','ACK','FIN']); info=`TLS ${src}:${sp} → ${dst}:443`; break;
+    case 'ICMP':flags=re(ICMP_TYPES); info=`ICMP ${flags} ${src} → ${dst}`; break;
+    case 'ARP': flags=re(ARP_OPS); info=`ARP ${flags}: ${src} → ${dst}`; break;
+    case 'DNS': flags=re(['Query','Response']); info=`DNS ${flags} port 53`; break;
+    case 'IPv4':info=`IPv4 ${src} → ${dst}`; break;
+    case 'IPv6':info=`IPv6 ${src} → ${dst}`; break;
+  }
+  return{id:++counter,time:now(),proto,src,dst,sp,dp,len,ttl,flags,info,sw,port,srcMac,dstMac,event:re(['packet_in','flow_mod','port_status'])};
+}
+
+function badge(p){return`<span class="badge ${p}">${p}</span>`;}
+
+function renderRow(p,isNew){
+  const tr=document.createElement('tr');
+  if(isNew)tr.classList.add('new');
+  if(p.id===selId)tr.classList.add('sel');
+  tr.innerHTML=`
+    <td class="dim">${p.id}</td>
+    <td class="dim">${p.time}</td>
+    <td>${badge(p.proto)}</td>
+    <td>${p.src}</td><td>${p.dst}</td>
+    <td class="dim">${p.sp}</td><td class="dim">${p.dp}</td>
+    <td class="dim" style="text-align:right">${p.len}</td>
+    <td class="dim" style="font-size:10px">${p.flags}</td>
+    <td class="dim">${p.sw}</td>
+    <td class="dim">${p.port}</td>
+    <td class="dim">${p.info}</td>`;
+  tr.onclick=()=>showDetail(p,tr);
+  return tr;
+}
+
+function showDetail(p,tr){
+  document.querySelectorAll('tr.sel').forEach(r=>r.classList.remove('sel'));
+  tr.classList.add('sel');selId=p.id;
+  const sec=(title,rows)=>`
+    <div class="detail-sec">
+      <div class="detail-sec-title">${title}</div>
+      ${rows.map(([k,v])=>`<div class="drow"><span class="dkey">${k}</span><span class="dval hi">${v}</span></div>`).join('')}
+    </div>`;
+  document.getElementById('detail').innerHTML=
+    sec('SDN / OpenFlow',[['Event',p.event],['Switch DPID',p.sw],['In Port',p.port]])+
+    sec('Ethernet Layer',[['Src MAC',p.srcMac],['Dst MAC',p.dstMac],['EtherType',p.proto==='ARP'?'0x0806':p.proto.startsWith('IPv6')?'0x86DD':'0x0800']])+
+    sec('Network / Transport',[['Protocol',p.proto],['Src IP',p.src],['Dst IP',p.dst],['Src Port',p.sp],['Dst Port',p.dp],['TTL',p.ttl],['Length',p.len+' bytes'],['Flags',p.flags]])+
+    `<div class="detail-sec"><div class="detail-sec-title">Info</div><div style="font-size:11px;color:var(--text);line-height:1.7">${p.info}</div></div>`;
+}
+
+function applyFilter(){
+  const pf=document.getElementById('pf').value;
+  const q=document.getElementById('sq').value.toLowerCase();
+  filtered=packets.filter(p=>{
+    if(pf!=='all'&&p.proto!==pf)return false;
+    if(q&&!(p.src+p.dst+p.sp+p.dp+p.info+p.proto+p.sw).toLowerCase().includes(q))return false;
+    return true;
+  });
+  renderTable();
+}
+
+function renderTable(){
+  const tbody=document.getElementById('tbody');
+  tbody.innerHTML='';
+  const show=filtered.slice(-400).reverse();
+  show.forEach((p,i)=>tbody.appendChild(renderRow(p,i===0&&running)));
+  document.getElementById('empty').style.display=show.length?'none':'block';
+  document.getElementById('fc').textContent=show.length+' of '+packets.length+' packets';
+  renderChart();
+}
+
+function renderChart(){
+  const total=Object.values(protoStats).reduce((a,b)=>a+b,0)||1;
+  const sorted=Object.entries(protoStats).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  document.getElementById('pchart').innerHTML=sorted.map(([proto,n])=>
+    `<div class="prow">
+      <span class="pname">${proto}</span>
+      <div class="pbar-bg"><div class="pbar" style="width:${Math.round(n/total*100)}%;background:${PROTO_COLOR[proto]||'#7d8590'}"></div></div>
+      <span class="pcnt">${n}</span>
+    </div>`).join('');
+}
+
+function updateMetrics(){
+  document.getElementById('m-pkts').textContent=packets.length;
+  const b=totalBytes;
+  document.getElementById('m-bytes').textContent=b>1048576?(b/1048576).toFixed(1)+' MB':b>1024?(b/1024).toFixed(1)+' KB':b+' B';
+  document.getElementById('m-protos').textContent=seenProtos.size;
+  document.getElementById('m-sw').textContent=switchSet.size;
+  document.getElementById('m-flows').textContent=flowSet.size;
+}
+
+function startCapture(){
+  if(running)return;
+  running=true;
+  document.getElementById('dot').style.cssText='width:7px;height:7px;border-radius:50%;background:var(--green);animation:blink 1.4s infinite';
+  document.getElementById('st').textContent='CAPTURING';
+  document.getElementById('btn-start').classList.add('on');
+  startTime=Date.now();
+
+  intv=setInterval(()=>{
+    const n=ri(1,4);
+    for(let i=0;i<n;i++){
+      const p=gen();
+      packets.push(p);totalBytes+=p.len;
+      protoStats[p.proto]=(protoStats[p.proto]||0)+1;
+      seenProtos.add(p.proto);switchSet.add(p.sw);
+      flowSet.add(p.src+':'+p.sp+'→'+p.dst+':'+p.dp);
+      recent++;
+    }
+    applyFilter();updateMetrics();
+  },500);
+
+  ppsIntv=setInterval(()=>{
+    document.getElementById('m-pps').textContent=recent;recent=0;
+  },1000);
+
+  uptimeIntv=setInterval(()=>{
+    const s=Math.floor((Date.now()-startTime)/1000);
+    document.getElementById('uptime').textContent='up '+(s>3600?Math.floor(s/3600)+'h ':'')+( s>60?Math.floor((s%3600)/60)+'m ':'')+s%60+'s';
+  },1000);
+}
+
+function stopCapture(){
+  if(!running)return;
+  running=false;
+  clearInterval(intv);clearInterval(ppsIntv);clearInterval(uptimeIntv);
+  document.getElementById('dot').style.cssText='width:7px;height:7px;border-radius:50%;background:var(--red)';
+  document.getElementById('st').textContent='STOPPED';
+  document.getElementById('btn-start').classList.remove('on');
+  document.getElementById('m-pps').textContent='0';
+}
+
+function clearLog(){
+  packets=[];filtered=[];counter=0;totalBytes=0;
+  protoStats={};switchSet=new Set();flowSet=new Set();seenProtos=new Set();selId=null;
+  document.getElementById('detail').innerHTML='<div class="no-sel">Click any row to inspect full packet headers.</div>';
+  renderTable();updateMetrics();
+}
+
+function exportCSV(){
+  const h=['#','Time','Protocol','Src IP','Dst IP','Src Port','Dst Port','Bytes','TTL','Flags','Switch','Port','Event','Src MAC','Dst MAC','Info'];
+  const rows=packets.map(p=>[p.id,p.time,p.proto,p.src,p.dst,p.sp,p.dp,p.len,p.ttl,p.flags,p.sw,p.port,p.event,p.srcMac,p.dstMac,`"${p.info}"`].join(','));
+  dl('sdn_packet_log.csv','data:text/csv;charset=utf-8,',[h.join(','),...rows].join('\n'));
+}
+function exportJSON(){
+  dl('sdn_packet_log.json','data:application/json;charset=utf-8,',JSON.stringify(packets,null,2));
+}
+function dl(name,mime,content){
+  const a=document.createElement('a');a.href=mime+encodeURIComponent(content);a.download=name;a.click();
+}
+
+setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString();},1000);
+updateMetrics();
+startCapture();
+</script>
+</body>
+</html>
